@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="sr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Zakazivanje termina</title>
+<style>
+  * { box-sizing: border-box; font-family: system-ui, -apple-system, sans-serif; }
+  body { max-width: 520px; margin: 0 auto; padding: 16px; background: #f0f2f5; color: #111; }
+
+  .header {
+    background: #fff;
+    border-radius: 12px;
+    padding: 24px 20px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    margin-bottom: 16px;
+    text-align: center;
+    border-top: 5px solid #25D366;
+  }
+  .logo {
+    max-width: 120px;
+    max-height: 120px;
+    margin: 0 auto 12px;
+    display: block;
+    border-radius: 50%;
+    object-fit: cover;
+    background: #f0f2f5;
+  }
+  .logo-placeholder {
+    width: 80px;
+    height: 80px;
+    margin: 0 auto 12px;
+    background: #25D366;
+    color: #fff;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 32px;
+    font-weight: 700;
+  }
+  .naziv { font-size: 24px; font-weight: 700; color: #111; margin: 0; }
+
+  .card { background: #fff; padding: 20px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+  h2 { margin: 0 0 16px; color: #075E54; font-size: 18px; }
+
+  label { display: block; margin: 12px 0 4px; font-weight: 600; font-size: 14px; }
+  input, select, textarea { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 8px; font-size: 15px; outline: none; background: #fff; font-family: inherit; }
+  input:focus, select:focus, textarea:focus { border-color: #25D366; }
+
+  button {
+    background: #25D366;
+    color: #fff;
+    border: 0;
+    padding: 13px 20px;
+    border-radius: 8px;
+    font-size: 16px;
+    font-weight: 600;
+    width: 100%;
+    margin-top: 16px;
+    cursor: pointer;
+  }
+  button:disabled { background: #999; cursor: not-allowed; }
+
+  .msg { padding: 10px; border-radius: 8px; margin-top: 12px; font-size: 14px; display: none; }
+  .msg.ok  { background: #d4edda; color: #155724; display: block; }
+  .msg.err { background: #f8d7da; color: #721c24; display: block; }
+
+  .slots { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+  .slot { padding: 8px 14px; border: 2px solid #25D366; border-radius: 8px; cursor: pointer; background: #fff; font-size: 14px; font-weight: 600; color: #075E54; }
+  .slot.selected { background: #25D366; color: #fff; }
+  .loading { color: #888; font-size: 14px; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div id="logoWrap"></div>
+  <h1 class="naziv" id="nazivRadnje">Učitavam...</h1>
+</div>
+
+<div class="card">
+  <h2>📅 Zakaži termin</h2>
+
+  <label>Usluga</label>
+  <select id="t_service"></select>
+
+  <label>Datum</label>
+  <input type="date" id="t_date" onchange="loadSlots()">
+
+  <label>Slobodni termini</label>
+  <div id="slots" class="slots"><em class="loading">Izaberi datum...</em></div>
+
+  <label>Ime i prezime</label>
+  <input type="text" id="t_name" placeholder="Marko Marković">
+
+  <label>Telefon</label>
+  <input type="tel" id="t_phone" placeholder="0641234567">
+
+  <button id="btnTermin" onclick="book()">Zakaži i pošalji na WhatsApp</button>
+  <div class="msg" id="msgTermin"></div>
+</div>
+
+<script>
+  // ============================================================
+  // ⚙️ OVDE UBACI SVOJ WEB APP URL
+  // ============================================================
+  const API_URL = 'https://script.google.com/macros/s/AKfycbxhV3Ta9VjnNNcNSHuTxsFTqLuTouIkTfE48DF976uLPCIPxUbV6hOLjwz7d0F3Wb0t1g/exec';
+  // ============================================================
+
+  let selectedSlot = null;
+  let appConfig = null;
+
+  function apiUrl(params) {
+    const qs = new URLSearchParams(params).toString();
+    return API_URL + '?' + qs;
+  }
+
+  async function ucitajKonfiguraciju() {
+    try {
+      const res = await fetch(apiUrl({ action: 'getConfig' }));
+      appConfig = await res.json();
+
+      document.getElementById('nazivRadnje').textContent = appConfig.nazivRadnje || 'Zakazivanje';
+
+      const logoWrap = document.getElementById('logoWrap');
+      if (appConfig.logoUrl) {
+        logoWrap.innerHTML = `<img src="${appConfig.logoUrl}" alt="Logo" class="logo" onerror="this.outerHTML='<div class=\\'logo-placeholder\\'>${(appConfig.nazivRadnje || '?').charAt(0)}</div>'">`;
+      } else {
+        const inicijal = (appConfig.nazivRadnje || '?').charAt(0).toUpperCase();
+        logoWrap.innerHTML = `<div class="logo-placeholder">${inicijal}</div>`;
+      }
+
+      const select = document.getElementById('t_service');
+      select.innerHTML = (appConfig.usluge || []).map(u =>
+        `<option value="${u}">${u}</option>`
+      ).join('');
+
+      const danas = new Date().toISOString().split('T')[0];
+      document.getElementById('t_date').min = danas;
+    } catch (e) {
+      document.getElementById('nazivRadnje').textContent = 'Greška pri učitavanju';
+    }
+  }
+
+  async function loadSlots() {
+    const date = document.getElementById('t_date').value;
+    const el = document.getElementById('slots');
+    if (!date) return;
+
+    el.innerHTML = '<em class="loading">Učitavam...</em>';
+    selectedSlot = null;
+
+    try {
+      const res = await fetch(apiUrl({ action: 'getSlots', date }));
+      const slots = await res.json();
+
+      if (!slots.length) {
+        el.innerHTML = '<em class="loading">Nema slobodnih termina za taj dan.</em>';
+        return;
+      }
+      el.innerHTML = slots.map(s =>
+        `<div class="slot" onclick="pickSlot(${s.id}, this)">${s.time}</div>`
+      ).join('');
+    } catch (e) {
+      el.innerHTML = '<em style="color:#c00;font-size:14px;">Greška: ' + e.message + '</em>';
+    }
+  }
+
+  function pickSlot(id, el) {
+    selectedSlot = id;
+    document.querySelectorAll('.slot').forEach(s => s.classList.remove('selected'));
+    el.classList.add('selected');
+  }
+
+  async function book() {
+    const msg = document.getElementById('msgTermin');
+    msg.className = 'msg';
+
+    if (!selectedSlot) return showMsg('msgTermin', 'Izaberi termin.', 'err');
+    const name    = document.getElementById('t_name').value.trim();
+    const phone   = document.getElementById('t_phone').value.trim();
+    const service = document.getElementById('t_service').value;
+
+    if (!name || !phone) return showMsg('msgTermin', 'Unesi ime i telefon.', 'err');
+
+    const btn = document.getElementById('btnTermin');
+    btn.disabled = true;
+    btn.textContent = 'Šaljem...';
+
+    try {
+      const res = await fetch(apiUrl({
+        action: 'book', id: selectedSlot, name, phone, service
+      }));
+      const data = await res.json();
+
+      if (data.status === 'success') {
+        showMsg('msgTermin', '✅ Termin zakazan! Otvaram WhatsApp...', 'ok');
+        window.open(data.whatsappLink, '_blank');
+      } else {
+        showMsg('msgTermin', '❌ ' + data.message, 'err');
+      }
+    } catch (e) {
+      showMsg('msgTermin', 'Greška: ' + e.message, 'err');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Zakaži i pošalji na WhatsApp';
+    }
+  }
+
+  function showMsg(id, text, type) {
+    const el = document.getElementById(id);
+    el.textContent = text;
+    el.className = 'msg ' + type;
+  }
+
+  ucitajKonfiguraciju();
+</script>
+
+</body>
+</html>
